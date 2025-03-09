@@ -2,7 +2,10 @@ import easyocr  # OCR
 import moviepy.editor as mpy
 import cv2
 import matplotlib.pyplot as plt
+from multiprocessing import Pool
 
+# TODO: Plan to fix:
+#
 
 def main():
     # TODO: Add template matching
@@ -16,7 +19,8 @@ def main():
         frame_interval = 20  # Interval to skip frames
         marker_interval = 90  # Duration of marker
         multi = False
-        time_stamps = process_video_ocr(debug, marker_coordinates, marker_text, frame_interval, marker_interval, debug)
+        gpu = get_gpu_selection()
+        time_stamps = process_video(debug, marker_coordinates, marker_text, frame_interval, marker_interval, debug)
     else:
         video = get_video() # Get video address
         fps = get_fps(video) # Get FPS
@@ -27,8 +31,9 @@ def main():
         marker_coordinates, marker_timestamp = get_marker_zone_location(video)  # Get marker zone location and timestamp
         marker = get_marker(marker_timestamp, video)  # Get marker image
         marker_text = get_marker_text() # Ask for marker text
-        if marker_text:
-            time_stamps = process_video_ocr(video, marker_coordinates, marker_text, frame_interval, marker_interval, debug) # OCR
+        gpu = get_gpu_selection() # Get GPU selection for CUDA
+        if marker_text: # This was changed, to just be a bool passed to process video rather than 2 separate functions
+            time_stamps = process_video_ocr(video, marker_coordinates, marker_text, frame_interval, marker_interval, debug)
         else:
             time_stamps = process_video_tm() # Template Matching
     frames_to_time(time_stamps, fps)
@@ -186,69 +191,159 @@ def plot(row, col, index, text, frame):
 def get_marker_text():
     return input("Input search text for OCR, leave blank for template matching")
 
-def process_video_ocr(video, marker_coordinates, marker_text, frame_interval, marker_interval, debug):
+def get_gpu_selection():
+    """
+    Return CUDA compatibility
+    @return: Bool for CUDA compatibility
+    """
+    if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+        return True
+    else:
+        return False
+
+# def process_video_ocr(video, marker_coordinates, marker_text, frame_interval, marker_interval, debug):
+#     """
+#     Read each frame of the video, crop to marker zone, read using Easy OCR, parse for marker, save timestamp
+#
+#     Loop through total frame count, if frame is mod interval: read and crop frame to marker zone. Preprocess frame and
+#     read using EasyOCR. If found, save frame count to time stamps, and skip forward by marker interval.
+#     @param video: Video address
+#     @param marker_coordinates: x, y, height, width of maker zone
+#     @param marker_text: Marker text to search for
+#     @param frame_interval: Frame interval to skip
+#     @param marker_interval: Marker interval to skip after finding a marker
+#     @param debug: Display each found frame
+#     @return:
+#     """
+#     time_stamps = [] # Time stamps of found markers, saved as frame numbers
+#     reader = easyocr.Reader(['en']) # Easy OCR reader
+#
+#     cv2_capture = cv2.VideoCapture(video)
+#     if not cv2_capture.isOpened(): # Error check for video
+#         print("Could not open video file")
+#         exit()
+#
+#     frame_total = int(cv2_capture.get(cv2.CAP_PROP_FRAME_COUNT)) # Get frame total
+#     frame_count = 0 # Frame counter
+#     frames_read = 0 # Frames read
+#     marker_found = False
+#     cv2_capture.set(1, frame_count) # Set video position
+#
+#     # Loop through video, reading each frame at set interval, preprocess then read set search box with OCR
+#     while frames_read <= frame_total:
+#         if marker_found: # If marker is found, skip forward marker interval
+#             frame_count = frame_count + marker_interval # Increase frame count by marker interval
+#             cv2_capture.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
+#             marker_found = False
+#         frame_count += 1
+#         if frame_count % frame_interval == 0: # Skip frame intervals
+#             frames_read +=1
+#             # Grab frame at frame count
+#             cv2_capture.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
+#             frame_grabbed, frame = cv2_capture.read()
+#             if not frame_grabbed:
+#                 print("Frame empty, possible error")
+#                 break
+#             if debug: # Shows frame counts
+#                 print(f"Frame Count: {frame_count}, {frames_read}")
+#             frame = frame[int(marker_coordinates[1]):int(marker_coordinates[1] + marker_coordinates[3]),
+#                     int(marker_coordinates[0]):int(marker_coordinates[0] + marker_coordinates[2])]  # Crop to marker
+#             frame = preprocess_ocr(frame) # Preprocess frame
+#
+#             results = reader.readtext(frame) # Read cropped frame with Easy OCR
+#             for result in results: # Loop through results
+#                 bbox, text, prob = result
+#                 if marker_text.lower() in text.lower(): # If marker in results
+#                     time_stamps.append(frame_count) # Save frame count to time stamp list
+#                     marker_found = True
+#
+#                     if debug: # Display timestamp, text, and probability of found marker
+#                         print(f"Timestamp found at {frame_count}")
+#                         print(f'Text: {text}, Probability: {prob}')
+#                         plt.figure(figsize=(8,5))
+#                         plot(1, 1, 1, 'Marker Zone', frame)  # Display marker zone
+#                         plt.tight_layout()
+#                         plt.show()
+#
+#     cv2_capture.release()
+#     cv2.destroyAllWindows()
+#     return time_stamps
+
+def process_video(video, tm, ocr, marker, marker_coordinates, marker_text, frame_interval, marker_interval, gpu, debug):
     """
     Read each frame of the video, crop to marker zone, read using Easy OCR, parse for marker, save timestamp
 
     Loop through total frame count, if frame is mod interval: read and crop frame to marker zone. Preprocess frame and
     read using EasyOCR. If found, save frame count to time stamps, and skip forward by marker interval.
+    @param tm: Template matching bool
+    @param ocr: Optical character recognition bool
     @param video: Video address
     @param marker_coordinates: x, y, height, width of maker zone
     @param marker_text: Marker text to search for
     @param frame_interval: Frame interval to skip
     @param marker_interval: Marker interval to skip after finding a marker
+    @param gpu: Bool for CUDA support
     @param debug: Display each found frame
-    @return:
+    @return: Timestamps as frame counts
     """
-    time_stamps = [] # Time stamps of found markers, saved as frame numbers
-    reader = easyocr.Reader(['en']) # Easy OCR reader
+    time_stamps = []  # Time stamps of found markers, saved as frame numbers
+    if ocr:
+        reader = easyocr.Reader(['en'])  # Easy OCR reader
 
     cv2_capture = cv2.VideoCapture(video)
-    if not cv2_capture.isOpened(): # Error check for video
+    if not cv2_capture.isOpened():  # Error check for video
         print("Could not open video file")
         exit()
 
-    frame_total = int(cv2_capture.get(cv2.CAP_PROP_FRAME_COUNT)) # Get frame total
-    frame_count = 0 # Frame counter
-    frames_read = 0 # Frames read
+    frame_total = int(cv2_capture.get(cv2.CAP_PROP_FRAME_COUNT))  # Get frame total
+    frame_count = 0  # Frame counter
+    frames_read = 0  # Frames read
     marker_found = False
-    cv2_capture.set(1, frame_count) # Set video position
+    cv2_capture.set(1, frame_count)  # Set video position
 
     # Loop through video, reading each frame at set interval, preprocess then read set search box with OCR
     while frames_read <= frame_total:
-        if marker_found: # If marker is found, skip forward marker interval
-            frame_count = frame_count + marker_interval # Increase frame count by marker interval
+        if marker_found:  # If marker is found, skip forward marker interval
+            frame_count = frame_count + marker_interval  # Increase frame count by marker interval
             cv2_capture.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
             marker_found = False
         frame_count += 1
-        if frame_count % frame_interval == 0: # Skip frame intervals
-            frames_read +=1
+        if frame_count % frame_interval == 0:  # Skip frame intervals
+            frames_read += 1
             # Grab frame at frame count
             cv2_capture.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
             frame_grabbed, frame = cv2_capture.read()
             if not frame_grabbed:
                 print("Frame empty, possible error")
                 break
-            if debug: # Shows frame counts
+            if debug:  # Shows frame counts
                 print(f"Frame Count: {frame_count}, {frames_read}")
             frame = frame[int(marker_coordinates[1]):int(marker_coordinates[1] + marker_coordinates[3]),
                     int(marker_coordinates[0]):int(marker_coordinates[0] + marker_coordinates[2])]  # Crop to marker
-            frame = preprocess_ocr(frame) # Preprocess frame
+            if tm:
+                frame = preprocess_tm(frame) # Preprocess frame
+                args = [frame, marker]
+                with Pool() as pool:
+                    if gpu:
+                        results = pool.map(template_matching_cuda, args)
+                    else:
+                        results = pool.map(template_matching(), args)
+            elif ocr:
+                frame = preprocess_ocr(frame) # Preprocess frame
+                results = reader.readtext(frame)  # Read cropped frame with Easy OCR
+                for result in results:  # Loop through results
+                    bbox, text, prob = result
+                    if marker_text.lower() in text.lower():  # If marker in results
+                        time_stamps.append(frame_count)  # Save frame count to time stamp list
+                        marker_found = True
 
-            results = reader.readtext(frame) # Read cropped frame with Easy OCR
-            for result in results: # Loop through results
-                bbox, text, prob = result
-                if marker_text.lower() in text.lower(): # If marker in results
-                    time_stamps.append(frame_count) # Save frame count to time stamp list
-                    marker_found = True
-
-                    if debug: # Display timestamp, text, and probability of found marker
-                        print(f"Timestamp found at {frame_count}")
-                        print(f'Text: {text}, Probability: {prob}')
-                        plt.figure(figsize=(8,5))
-                        plot(1, 1, 1, 'Marker Zone', frame)  # Display marker zone
-                        plt.tight_layout()
-                        plt.show()
+                        if debug:  # Display timestamp, text, and probability of found marker
+                            print(f"Timestamp found at {frame_count}")
+                            print(f'Text: {text}, Probability: {prob}')
+                            plt.figure(figsize=(8, 5))
+                            plot(1, 1, 1, 'Marker Zone', frame)  # Display marker zone
+                            plt.tight_layout()
+                            plt.show()
 
     cv2_capture.release()
     cv2.destroyAllWindows()
@@ -266,6 +361,61 @@ def preprocess_ocr(frame):
     frame = cv2.adaptiveThreshold(frame, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                   cv2.THRESH_BINARY, 11, 2) # Binarization
     return frame
+
+def preprocess_tm(frame, debug):
+    # TODO: Fix all of this
+    """
+    Preprocess frame using cv2 functions for better effect in template matching
+
+    Greyscale, normalization, gaussian blur, histogram equalization, edge detection, binarization
+    @param frame: cv2 image
+    @param debug: Show each transformation
+    @return: frame post transformation
+    """
+    if debug:
+        plt.figure(figsize=(12, 8))
+        plot(4,2,1,'Original Frame', frame)
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # Greyscale
+    if debug:
+        plot(4,2,2,'Grayscale', frame)
+    frame = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX) # Normalize
+    if debug:
+        plot(4,2,3,'Normalize', frame)
+    frame = cv2.GaussianBlur(frame, (5, 5), 0) # Blur
+    if debug:
+        plot(4,2,4,'Gaussian Blur', frame)
+    frame = cv2.equalizeHist(frame) # Histogram equalization - contrast
+    if debug:
+        plot(4,2,5,'Histogram equal', frame)
+    frame = cv2.Canny(frame, 50, 150) # Edge Detection using canny - more shape focus
+    if debug:
+        plot(4,2,6,'Edge Detection', frame)
+    _, frame = cv2.threshold(frame, 127, 255, cv2.THRESH_BINARY) # Binarization
+    if debug:
+        plot(4,2,7,'Threshold', frame)
+        plt.tight_layout()
+        plt.show()
+    return frame
+
+def template_matching_cuda(args):
+    frame, marker = args
+
+    # Upload images to the GPU
+    gpu_frame = cv2.cuda_GpuMat()
+    gpu_frame.upload(frame)
+    gpu_marker = cv2.cuda_GpuMat()
+    gpu_marker.upload(marker)
+
+
+    result = cv2.cuda.templateMatching(gpu_frame, gpu_marker, cv2.TM_CCOEFF_NORMED)
+    _, max_val, _, _ = cv2.minMaxLoc(result) # Get matching amount
+
+    result_cpu = result.download()
+    return result_cpu, max_val
+
+def template_matching(args):
+    frame, marker = args
+    result = cv2.matchTemplate(frame, marker, cv2.TM_CCOEFF_NORMED)
 
 # def process_video_tm(video, marker_coordinates, frame_interval, marker_interval, debug):
 #     time_stamps = [] # Time stamps of found markers, saved as frame numbers
@@ -341,40 +491,6 @@ def preprocess_ocr(frame):
 #     cv2.destroyAllWindows()
 #     return time_stamps
 
-# def preprocess_tm(frame, debug):
-#     # TODO: Fix all of this
-#     """
-#     Preprocess frame using cv2 functions for better effect in template matching
-#
-#     Greyscale, normalization, gaussian blur, histogram equalization, edge detection, binarization
-#     @param frame: cv2 image
-#     @param debug: Show each transformation
-#     @return: frame post transformation
-#     """
-#     if debug:
-#         plt.figure(figsize=(12, 8))
-#         plot(4,2,1,'Original Frame', frame)
-#     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # Greyscale
-#     if debug:
-#         plot(4,2,2,'Grayscale', frame)
-#     frame = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX) # Normalize
-#     if debug:
-#         plot(4,2,3,'Normalize', frame)
-#     frame = cv2.GaussianBlur(frame, (5, 5), 0) # Blur
-#     if debug:
-#         plot(4,2,4,'Gaussian Blur', frame)
-#     frame = cv2.equalizeHist(frame) # Histogram equalization - contrast
-#     if debug:
-#         plot(4,2,5,'Histogram equal', frame)
-#     frame = cv2.Canny(frame, 50, 150) # Edge Detection using canny - more shape focus
-#     if debug:
-#         plot(4,2,6,'Edge Detection', frame)
-#     _, frame = cv2.threshold(frame, 127, 255, cv2.THRESH_BINARY) # Binarization
-#     if debug:
-#         plot(4,2,7,'Threshold', frame)
-#         plt.tight_layout()
-#         plt.show()
-#     return frame
 
 def frames_to_time(time_stamps, fps):
     """

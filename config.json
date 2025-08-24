@@ -6,5 +6,7 @@
     "frame_interval": 20,
     "marker_interval": 90,
     "marker_coordinates": [511, 306, 70, 103],
-    "marker_text": "ki"
+    "marker_text": "ki",
+    "multi": false,
+    "debug": true
 }

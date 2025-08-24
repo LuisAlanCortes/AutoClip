@@ -1,4 +1,8 @@
+import os
+
 import config_handler
+import cv2
+
 
 def get_video_params():
     """Gets video params from config or from user input.
@@ -13,6 +17,8 @@ def get_video_params():
             - "marker_interval" (int): Duration of the marker.
             - "marker_coordinates" (tuple[int, int, int, int]): The marker's bounding box (x, y, width, height).
             - "marker_text" (str): The text used for marker detection.
+            - "multi" (bool): Whether to save clips as multiple files or a single compilation.
+            - "debug" (bool): Whether to enable debug mode.
     """
     config = config_handler.load_config()
 
@@ -42,23 +48,48 @@ def get_video_params():
             "suffix": suffix,
             "frame_interval": frame_interval,
             "marker_interval": marker_interval,
+            "multi": multi,
             "marker_coordinates": marker_coordinates,
             "marker_text": marker_text,
+            "debug": get_mode()
         }
-        save_choice = input("Save these settings for next time? [Y/n]: ").strip().lower()
+        save_choice = input("Save settings? [Y/n]: ").strip().lower()
         if save_choice == "y":
             config_handler.save_config(config)
             print("Settings saved!")
 
         return config
 
+
 def get_video():
     """
-    Get video address from user
-    @return: video address
+    Get and validate video address from user, handling quoted paths and normalizing separators.
+    Reprompts until a valid video file is provided.
+
+    Returns:
+        str: Normalized video file path
     """
-    video = input("Input video address: ")
-    return video.replace('\\', '/') # Convert backslashes
+    while True:
+        # Get input and strip quotes and whitespace
+        video = input("Input video address: ").strip().strip('"\'')
+
+        # Normalize path separators and make absolute
+        video = os.path.abspath(video.replace('\\', '/'))
+
+        # Check if file exists
+        if not os.path.isfile(video):
+            print(f"File not found: {video}")
+            continue
+
+        # Try opening with OpenCV to validate it's a video file
+        cap = cv2.VideoCapture(video)
+        if not cap.isOpened():
+            print(f"Could not open as video file: {video}")
+            cap.release()
+            continue
+
+        cap.release()
+        return video
 
 def get_fps(video):
     """
@@ -68,11 +99,10 @@ def get_fps(video):
     """
     cv2_capture = cv2.VideoCapture(video)
     if not cv2_capture.isOpened():
-        print("Could not open video file")
+        print("Could not open video file - get_fps")
         exit()
     fps = cv2_capture.get(cv2.CAP_PROP_FPS)
     cv2_capture.release()
-    cv2.destroyAllWindows()
     return fps
 
 def get_affixes():
@@ -100,7 +130,7 @@ def get_marker_interval():
     @return: marker interval in seconds
     """
     marker_interval =  input("Input marker interval HH:MM:SS (Length of time of marker - "
-                             "Destiny 1 kill marker lasts on screen for 3 seconds): ")
+                             "Destiny 1 kill marker lasts on screen for 3 seconds: 00:00:03): ")
     return timestamp_to_seconds(marker_interval)
 
 def get_multi():
@@ -157,8 +187,39 @@ def get_marker_zone_location(video):
     marker_rect = cv2.selectROI("Select marker location", frame, False)  # Select marker zone
     marker_coordinates = marker_rect[0], marker_rect[1], marker_rect[2], marker_rect[3] # Store zone coordinates
     cv2_capture.release()
-    cv2.destroyAllWindows()
     return marker_coordinates, marker_timestamp
+
+def preprocess_ocr(frame):
+    """
+    Preprocess cv2 image for OCR
+    Greyscale, invert, and binarization
+    @param frame: CV2 image
+    @return: cv2 image post transformation
+    """
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # Greyscale
+    frame = cv2.bitwise_not(frame) # Invert
+    frame = cv2.adaptiveThreshold(frame, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                  cv2.THRESH_BINARY, 11, 2) # Binarization
+    return frame
+
+
+def preprocess_tm(frame, debug):
+    """
+    Preprocess frame using cv2 functions for better effect in template matching
+
+    Greyscale, normalization, gaussian blur, histogram equalization, edge detection, binarization
+    @param frame: cv2 image
+    @param debug: Show each transformation
+    @return: frame post transformation
+    """
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # Greyscale
+    frame = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX) # Normalize
+    frame = cv2.GaussianBlur(frame, (5, 5), 0) # Blur
+    frame = cv2.equalizeHist(frame) # Histogram equalization - contrast
+    frame = cv2.Canny(frame, 50, 150) # Edge Detection using canny - more shape focus
+    _, frame = cv2.threshold(frame, 127, 255, cv2.THRESH_BINARY) # Binarization
+    return frame
+
 
 def get_marker(marker_timestamp, video):
     """
@@ -181,23 +242,25 @@ def get_marker(marker_timestamp, video):
     marker_rect = cv2.selectROI("Select marker", frame, False)  # Select ROI
     marker = preprocess_tm(marker_rect, True) # Preprocess marker
     cv2_capture.release()
-    cv2.destroyAllWindows()
     return marker
 
-def plot(row, col, index, text, frame):
-    """
-    Creates a subplot using matplotlib
-    @param row: row count
-    @param col: column count
-    @param index: index
-    @param text: description
-    @param frame: image
-    """
-    plt.subplot(row, col, index)
-    plt.title(text)
-    plt.imshow(frame, cmap='gray')
-    plt.axis('off')
-    plt.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
 
 def get_marker_text():
     return input("Input search text for OCR, leave blank for template matching")
+
+
+def frames_to_time(time_stamps, fps):
+    """
+    Convert frame counts in timestamp array to seconds
+    @param time_stamps: Array of frame counts
+    @param fps: Frames per second of video
+    """
+    for i in range(len(time_stamps)):
+        time_stamps[i] = time_stamps[i] / fps
+
+def get_mode():
+    mode = input("Type 1 to debug mode - Displays every frame where markers are shown")
+    if mode == '1':
+        return True
+    else:
+        return False

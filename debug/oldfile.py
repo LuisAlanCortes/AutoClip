@@ -1,7 +1,7 @@
 import torch
 import easyocr  # OCR
 from PIL import Image  # OCR
-import moviepy.editor as mpy
+import moviepy as mpy
 import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import cv2

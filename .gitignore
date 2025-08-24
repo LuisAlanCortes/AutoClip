@@ -1,0 +1,41 @@
+# PyCharm
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+
+# Debug files and folders
+#debug/
+*.log
+
+# Project specific
+#config.json
+#debug_plotting.py
+#manual_timestamps.txt

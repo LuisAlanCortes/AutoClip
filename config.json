@@ -1,12 +1,24 @@
 {
-    "video": "C:/Users/Cortes/PycharmProjects/AutoClip/Destiny Iron Banner Destruction.mp4",
-    "fps": 0,
-    "prefix": 5,
-    "suffix": 5,
+    "video": "E:\\Footage\\Destiny Iron Banner Destruction.mp4",
+    "fps": 29.97002997002997,
     "frame_interval": 20,
-    "marker_interval": 90,
-    "marker_coordinates": [511, 306, 70, 103],
+    "marker_interval": 149,
+    "marker_zone_coordinates": [
+        517,
+        284,
+        65,
+        124
+    ],
+    "marker_timestamp": 33.5,
+    "marker_coordinates": [
+        518,
+        369,
+        63,
+        17
+    ],
     "marker_text": "ki",
+    "prefix": 2.0,
+    "suffix": 2.0,
     "multi": false,
     "debug": true
 }

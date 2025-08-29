@@ -14,7 +14,7 @@ def cut_video(video, markers, prefix, suffix, multi):
     video_object = mpy.VideoFileClip(video)
     clips = []
     for i in range(len(markers)): # Loop through markers and create a subclip starting at marker - & + affixes
-        clips.append(video_object.subclip((markers[i]-prefix), (markers[i]+suffix)))
+        clips.append(video_object.subclipped((markers[i]-prefix), (markers[i]+suffix)))
     if multi: # If multi save loop through clips and save all to file
         for i in range(len(clips)):
             clip_title = f"debug{i}" # Clip title and add clip number

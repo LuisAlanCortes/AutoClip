@@ -39,3 +39,4 @@ ENV/
 #config.json
 #debug_plotting.py
 #manual_timestamps.txt
+.mp4

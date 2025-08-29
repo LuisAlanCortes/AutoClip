@@ -1,5 +1,4 @@
 import os
-
 import config_handler
 import cv2
 
@@ -15,7 +14,9 @@ def get_video_params():
             - "suffix" (int): Time to save after marker.
             - "frame_interval" (int): Interval to skip frames.
             - "marker_interval" (int): Duration of the marker.
-            - "marker_coordinates" (tuple[int, int, int, int]): The marker's bounding box (x, y, width, height).
+            - "marker_zone_coordinates" (tuple[int, int, int, int]): The marker zone bounding box (x, y, width, height).
+            - "marker_coordinates" = (tuple[int, int, int, int]): The marker zone bounding box (x, y, width, height).
+            - "marker_timestamp" (int): Marker timestamp in seconds.
             - "marker_text" (str): The text used for marker detection.
             - "multi" (bool): Whether to save clips as multiple files or a single compilation.
             - "debug" (bool): Whether to enable debug mode.
@@ -33,25 +34,29 @@ def get_video_params():
     else:
         video = get_video()  # Get video address
         fps = get_fps(video)  # Get FPS
-        prefix, suffix = get_affixes()  # Get times to save before and after markers
         frame_interval = get_frame_interval()
-        marker_interval = get_marker_interval()
-        multi = get_multi()
-        marker_coordinates, marker_timestamp = get_marker_zone_location(video)  # Get marker zone location and timestamp
-        marker = get_marker(marker_timestamp, video)  # Get marker image
+        marker_interval = get_marker_interval(fps)
+        marker_zone_coordinates, marker_timestamp = get_marker_zone_location(video)  # Get marker zone location and timestamp
+        marker_coordinates = get_marker(video, marker_timestamp, marker_zone_coordinates)  # Get marker coordinates
         marker_text = get_marker_text()  # Ask for marker text
+        prefix, suffix = get_affixes()  # Get times to save before and after markers
+        multi = get_multi()
+        debug = get_mode()  # Get debug mode
+
 
         config = {
             "video": video,
             "fps": fps,
-            "prefix": prefix,
-            "suffix": suffix,
             "frame_interval": frame_interval,
             "marker_interval": marker_interval,
-            "multi": multi,
+            "marker_zone_coordinates": marker_zone_coordinates,
+            "marker_timestamp": marker_timestamp,
             "marker_coordinates": marker_coordinates,
             "marker_text": marker_text,
-            "debug": get_mode()
+            "prefix": prefix,
+            "suffix": suffix,
+            "multi": multi,
+            "debug": debug
         }
         save_choice = input("Save settings? [Y/n]: ").strip().lower()
         if save_choice == "y":
@@ -111,83 +116,105 @@ def get_affixes():
     Convert timestamp in HH:MM:SS format to seconds
     @return: prefix and suffix in seconds
     """
-    prefix = input("Input time to cut before markers(e.g. 01:00): ")
-    prefix = timestamp_to_seconds(prefix) # Convert timestamp to seconds
-    suffix = input("Input time to cut after markers(e.g. 01:00): ")
-    suffix = timestamp_to_seconds(suffix)
+    prefix = parse_time_input("Input prefix (time to cut BEFORE markers) (HH:MM:SS or MM:SS or S): ")
+    suffix = parse_time_input("Input suffix (time to cut AFTER markers) (HH:MM:SS or MM:SS or S): ")
     return prefix, suffix
 
 def get_frame_interval():
     """
-    Get frame interval from user
-    @return: frame interval
+    Get frame interval from user and ensures it's an integer.
+    @return: frame interval as an integer
     """
-    return input("Input how many frames to skip (30 @ 30fps, would mean checking a frame every second)")
+    while True:
+        try:
+            interval_str = input("Input frame skip interval (e.g., 30 for 30fps to check every second): ")
+            return int(interval_str)
+        except ValueError:
+            print("Invalid input. Please enter a whole number.")
 
-def get_marker_interval():
+def get_marker_interval(fps):
     """
-    Get marker interval from user as HH:MM:SS and convert to seconds
-    @return: marker interval in seconds
+    Get marker interval from user and convert to frames
+
+    Args:
+        fps (float): Video frames per second
+
+    Returns:
+        int: Number of frames to skip after finding a marker
     """
-    marker_interval =  input("Input marker interval HH:MM:SS (Length of time of marker - "
-                             "Destiny 1 kill marker lasts on screen for 3 seconds: 00:00:03): ")
-    return timestamp_to_seconds(marker_interval)
+    seconds = parse_time_input("Input marker skip interval (Length of time to skip after a marker is found) (HH:MM:SS or MM:SS or S): ")
+    frames = int(seconds * fps)
+    print(f"    Converting {seconds} seconds to {frames} frames at {fps} FPS")
+    return frames
+
 
 def get_multi():
     """
     Get if user wants multi clips or single compilation
     @return: Multi bool
     """
-    multi = input("Type Y to save found markers as multiple clips. N for a single compilation of all clips")
+    multi = input("Input Multi Mode Selection (Type Y to save found markers as multiple clips. N for a single compilation of all clips): ")
     if multi.lower() == 'y':
         return True
     else:
         return False
 
-def timestamp_to_seconds(timestamp):
-    """
-    Convert timestamp in HH:MM:SS format to seconds
-    @param timestamp:
-    @return: time in seconds
-    """
-    seconds = 0
-    for block in timestamp.split(':'):
-        seconds = seconds * 60 + int(block, 10)
-    return seconds
 
 def get_marker_zone_location(video):
     """
-    Get marker zone coordinates from user by using rectangle selector
+    Get marker zone coordinates from user by using rectangle selector.
 
-    Ask user for timestamp in HH:MM:SS format and convert to seconds
-    Open frame at time stamp given
-    User selects marker using rectangle selector (Select ROI cv2 function)
-    @param video: Video address
-    @return: marker coordinates in x, y, height, width
-             marker timestamp in seconds
+    Asks user for a timestamp, shows the frame, and asks for confirmation.
+    If not confirmed, it re-prompts for the timestamp.
+    Once confirmed, the user selects the marker area using a rectangle selector.
+
+    Args:
+        video (str): The path to the video file.
+
+    Returns:
+        tuple: A tuple containing:
+            - tuple[int, int, int, int]: Marker coordinates (x, y, width, height).
+            - int: The confirmed marker timestamp in seconds.
     """
-    marker_timestamp = input("Input timestamp(HH:MM:SS) where search marker will show: ")
-    marker_timestamp = timestamp_to_seconds(marker_timestamp) # Convert timestamp to seconds
-
-    # Open video and set it to frame given by user
     cv2_capture = cv2.VideoCapture(video)
     if not cv2_capture.isOpened():
         print("Could not open video file")
         exit()
 
     marker_fps = cv2_capture.get(cv2.CAP_PROP_FPS)
-    marker_timestamp = float(marker_timestamp) * marker_fps # Calculate frame based on second
+    frame = None
+    marker_timestamp_seconds = 0
 
-    cv2_capture.set(1, marker_timestamp)
-    frame_grabbed, frame = cv2_capture.read()
-    if not frame_grabbed:
-        print("Frame empty, possible error")
-        exit()
+    while True:
+        marker_timestamp_seconds = parse_time_input("Input sample marker timestamp (HH:MM:SS or MM:SS or S): ")
+        frame_number = int(marker_timestamp_seconds * marker_fps)
+        cv2_capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
 
-    marker_rect = cv2.selectROI("Select marker location", frame, False)  # Select marker zone
-    marker_coordinates = marker_rect[0], marker_rect[1], marker_rect[2], marker_rect[3] # Store zone coordinates
+        frame_grabbed, frame = cv2_capture.read()
+        if not frame_grabbed:
+            print("Frame empty, possible error. Please try another timestamp.")
+            continue
+
+        cv2.imshow("Confirm Frame", frame)
+        cv2.waitKey(1)
+        print("Showing frame at the specified timestamp. Check the window.")
+
+        # Wait for user input in the console, not the OpenCV window
+        confirm = input("Is this the correct frame? [Y/n]: ").strip().lower()
+
+        cv2.destroyWindow("Confirm Frame")
+
+        if confirm == 'y' or confirm == '':
+            break
+
+    # Proceed with ROI selection on the confirmed frame
+    marker_rect = cv2.selectROI("Select marker location", frame, False)
+    cv2.destroyAllWindows()
+
+    marker_coordinates = (marker_rect[0], marker_rect[1], marker_rect[2], marker_rect[3])
     cv2_capture.release()
-    return marker_coordinates, marker_timestamp
+
+    return marker_coordinates, marker_timestamp_seconds
 
 def preprocess_ocr(frame):
     """
@@ -203,13 +230,12 @@ def preprocess_ocr(frame):
     return frame
 
 
-def preprocess_tm(frame, debug):
+def preprocess_tm(frame):
     """
     Preprocess frame using cv2 functions for better effect in template matching
 
     Greyscale, normalization, gaussian blur, histogram equalization, edge detection, binarization
     @param frame: cv2 image
-    @param debug: Show each transformation
     @return: frame post transformation
     """
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # Greyscale
@@ -221,32 +247,50 @@ def preprocess_tm(frame, debug):
     return frame
 
 
-def get_marker(marker_timestamp, video):
-    """
-    Get marker at timestamp, and preprocess
-    @param marker_timestamp: Marker location timestamp in seconds
-    @param video: Video address
-    @return: Marker as a cv2 image, preprocessed
-    """
-    # Open video and set to timestamp
-    cv2_capture = cv2.VideoCapture(video)
-    if not cv2_capture.isOpened():  # Error check for video
-        print("Could not open video file")
-        exit()
-    cv2_capture.set(1, marker_timestamp)
-    frame_grabbed, frame = cv2_capture.read()
-    if not frame_grabbed:
-        print("Frame empty, possible error")
-        exit()
+def get_marker(video, marker_timestamp, marker_zone_coordinates):
+        """
+        From a sample frame, crops to the marker zone, then allows the user
+        to select the specific marker within that zone.
+        @param video: Video address.
+        @param marker_timestamp: Marker location timestamp in seconds.
+        @param marker_zone_coordinates: A tuple (x, y, w, h) for the search zone ROI.
+        @return: A tuple (x, y, w, h) for the specific marker, relative to the full frame.
+        """
+        # Open video and set to timestamp
+        cv2_capture = cv2.VideoCapture(video)
+        if not cv2_capture.isOpened():
+            print("Could not open video file")
+            exit()
 
-    marker_rect = cv2.selectROI("Select marker", frame, False)  # Select ROI
-    marker = preprocess_tm(marker_rect, True) # Preprocess marker
-    cv2_capture.release()
-    return marker
+        fps = cv2_capture.get(cv2.CAP_PROP_FPS)
+        frame_number = int(marker_timestamp * fps)
+        cv2_capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+
+        frame_grabbed, frame = cv2_capture.read()
+        if not frame_grabbed:
+            print("Frame empty, possible error")
+            exit()
+        cv2_capture.release()
+
+        # Crop the frame to the marker zone for easier selection
+        zx, zy, zw, zh = marker_zone_coordinates
+        zone_image = frame[zy:zy+zh, zx:zx+zw]
+
+        # Allow user to select the marker within the zone
+        marker_rect_relative = cv2.selectROI("Select the marker within this zone", zone_image, False)
+        cv2.destroyAllWindows()
+
+        # Convert relative marker coordinates to absolute coordinates on the full frame
+        rx, ry, rw, rh = marker_rect_relative
+        absolute_x = zx + rx
+        absolute_y = zy + ry
+        marker_coordinates_absolute = (absolute_x, absolute_y, rw, rh)
+
+        return marker_coordinates_absolute
 
 
 def get_marker_text():
-    return input("Input search text for OCR, leave blank for template matching")
+    return input("Input search text for OCR (Leave blank for Template Matching only): ")
 
 
 def frames_to_time(time_stamps, fps):
@@ -259,8 +303,61 @@ def frames_to_time(time_stamps, fps):
         time_stamps[i] = time_stamps[i] / fps
 
 def get_mode():
-    mode = input("Type 1 to debug mode - Displays every frame where markers are shown")
+    mode = input("Type 1 for Debug mode (Displays every frame where markers are found): ")
     if mode == '1':
         return True
     else:
         return False
+
+
+def parse_time_input(prompt):
+    """
+    Get and validate time input from user in HH:MM:SS, MM:SS, or seconds format.
+    Seconds can be a floating point number.
+
+    Args:
+        prompt (str): Input prompt for the user
+
+    Returns:
+        float: Time in seconds
+    """
+    while True:
+        time_str = input(prompt).strip()
+
+        if not time_str:
+            print("Input cannot be empty.")
+            continue
+
+        # Try to parse as a float first (for seconds like 33.5)
+        try:
+            seconds = float(time_str)
+            int_seconds = int(seconds)
+            formatted_time = f"{int_seconds//3600:02d}:{(int_seconds%3600)//60:02d}:{int_seconds%60:02d}"
+            print(f"    Input: {seconds} seconds (approximately {formatted_time})")
+            return seconds
+        except ValueError:
+            # If not a float, it might be HH:MM:SS or MM:SS
+            pass
+
+        try:
+            parts = time_str.split(':')
+            total_seconds = 0.0
+
+            if len(parts) == 2:  # MM:SS format
+                minutes = int(parts[0])
+                seconds = float(parts[1])  # Allow float in seconds part
+                if 0 <= minutes < 60 and 0 <= seconds < 60:
+                    total_seconds = float(minutes * 60) + seconds
+                    return total_seconds
+
+            elif len(parts) == 3:  # HH:MM:SS format
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                seconds = float(parts[2])  # Allow float in seconds part
+                if 0 <= hours < 24 and 0 <= minutes < 60 and 0 <= seconds < 60:
+                    total_seconds = float(hours * 3600 + minutes * 60) + seconds
+                    return total_seconds
+
+            print("Invalid format. Use seconds (e.g., 120 or 33.5) or HH:MM:SS (e.g., 01:30 or 00:02:00.5)")
+        except ValueError:
+            print("Invalid input. Use numbers, decimals, or time format.")

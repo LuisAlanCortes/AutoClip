@@ -35,3 +35,4 @@ After fixing bug of not actually skipping frames
 [1580, 2680, 2780, 5060, 5080, 5100, 6020, 6420, 6680, 6860, 6880, 6920, 6940, 7160, 7180, 7480, 7540, 8760, 9200, 9220, 9680, 10420, 10440, 10460, 12560, 12580, 14440, 15260]
 Second Run: Skipped forward 3 seconds after a kill is found
 [1580, 2680, 2780, 5060, 6020, 6420, 6680, 6860, 7160, 7480, 8760, 9200, 9680, 10420, 12560, 14440, 15260]
+"E:\Footage\Destiny Iron Banner Destruction.mp4"

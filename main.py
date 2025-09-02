@@ -4,38 +4,75 @@ import cv2
 import matplotlib.pyplot as plt
 from multiprocessing import Pool
 
-# TODO: Plan to fix:
-#
+from config_handler import load_config, save_config
+
 
 def main():
-    # TODO: Add template matching
+    config = load_config()
+
     debug = True  # Show all frames being processed
     if debug:
-        video = "C:/Users/Cortes/PycharmProjects/AutoClip/Destiny Iron Banner Destruction.mp4"
+        video = config.get("video") or "C:/Users/Cortes/PycharmProjects/AutoClip/Destiny Iron Banner Destruction.mp4"
         fps = get_fps(video)
-        prefix, suffix = 5, 5
+        prefix = config.get("prefix", 5)
+        suffix = config.get("suffix", 5)
         marker_coordinates = (511, 306, 70, 103)
-        marker_text = "ki"
-        frame_interval = 20  # Interval to skip frames
-        marker_interval = 90  # Duration of marker
-        multi = False
+        marker_text = config.get("marker_text", "ki")
+        frame_interval = config.get("frame_interval", 20)
+        marker_interval = config.get("marker_interval", 90)
+        multi = config.get("multi", False)
         gpu = get_gpu_selection()
-        time_stamps = process_video(debug, marker_coordinates, marker_text, frame_interval, marker_interval, debug)
+        time_stamps = process_video(video, tm=False, ocr=True, marker=None,
+                                    marker_coordinates=marker_coordinates,
+                                    marker_text=marker_text,
+                                    frame_interval=frame_interval,
+                                    marker_interval=marker_interval,
+                                    gpu=gpu,
+                                    debug=debug)
     else:
-        video = get_video() # Get video address
-        fps = get_fps(video) # Get FPS
-        prefix, suffix = get_affixes() # Get times to save before and after markers
-        frame_interval = get_frame_interval()
-        marker_interval = get_marker_interval()
-        multi = get_multi()
-        marker_coordinates, marker_timestamp = get_marker_zone_location(video)  # Get marker zone location and timestamp
-        marker = get_marker(marker_timestamp, video)  # Get marker image
-        marker_text = get_marker_text() # Ask for marker text
-        gpu = get_gpu_selection() # Get GPU selection for CUDA
-        if marker_text: # This was changed, to just be a bool passed to process video rather than 2 separate functions
-            time_stamps = process_video_ocr(video, marker_coordinates, marker_text, frame_interval, marker_interval, debug)
+        video = config.get("video") or get_video()
+        fps = get_fps(video)
+        prefix, suffix = config.get("prefix"), config.get("suffix")
+        if prefix is None or suffix is None:
+            prefix, suffix = get_affixes()
+        frame_interval = config.get("frame_interval") or get_frame_interval()
+        marker_interval = config.get("marker_interval") or get_marker_interval()
+        multi = config.get("multi")
+        if multi is None:
+            multi = get_multi()
+        marker_coordinates, marker_timestamp = get_marker_zone_location(video)
+        marker = get_marker(marker_timestamp, video)
+        marker_text = config.get("marker_text") or get_marker_text()
+        gpu = get_gpu_selection()
+
+        if marker_text:
+            time_stamps = process_video(video, tm=False, ocr=True, marker=marker,
+                                        marker_coordinates=marker_coordinates,
+                                        marker_text=marker_text,
+                                        frame_interval=frame_interval,
+                                        marker_interval=marker_interval,
+                                        gpu=gpu,
+                                        debug=debug)
         else:
-            time_stamps = process_video_tm() # Template Matching
+            time_stamps = process_video(video, tm=True, ocr=False, marker=marker,
+                                        marker_coordinates=marker_coordinates,
+                                        marker_text="",
+                                        frame_interval=frame_interval,
+                                        marker_interval=marker_interval,
+                                        gpu=gpu,
+                                        debug=debug)
+
+    config.update({
+        "video": video,
+        "prefix": prefix,
+        "suffix": suffix,
+        "frame_interval": frame_interval,
+        "marker_interval": marker_interval,
+        "multi": multi,
+        "marker_text": marker_text
+    })
+    save_config(config)
+
     frames_to_time(time_stamps, fps)
     cut_video(video, time_stamps, prefix, suffix, multi)
 

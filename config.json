@@ -1,0 +1,9 @@
+{
+  "video": "",
+  "prefix": 5,
+  "suffix": 5,
+  "frame_interval": 20,
+  "marker_interval": 90,
+  "multi": false,
+  "marker_text": "ki"
+}
